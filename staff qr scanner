@@ -1,0 +1,248 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#193e6b">
+  <title>IITE SSIP 2.0 QR Scanner</title>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 18px;
+      background: #f1f5fa;
+      color: #172033;
+      font-family: Arial, sans-serif;
+    }
+
+    main {
+      max-width: 540px;
+      margin: 0 auto;
+      background: white;
+      padding: 22px;
+      border-radius: 14px;
+      box-shadow: 0 3px 14px #00000012;
+    }
+
+    h1 { color: #193e6b; font-size: 24px; }
+    p { line-height: 1.5; }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 10px;
+      border: 0;
+      border-radius: 8px;
+      background: #193e6b;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    button.secondary { background: #596579; }
+    button:disabled { opacity: .5; }
+
+    #reader {
+      width: 100%;
+      margin-top: 16px;
+    }
+
+    #status {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f1f5f9;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+    }
+
+    #continueButton { display: none; }
+    .muted { color: #64748b; font-size: 14px; }
+  </style>
+</head>
+
+<body>
+<main>
+  <h1>IITE SSIP 2.0</h1>
+  <p>QR Attendance Scanner</p>
+  <p class="muted">
+    Scan the student's official registration QR code. Verify the
+    registration details in the IITE portal before marking attendance.
+  </p>
+
+  <button id="startButton" type="button" onclick="startScanner()">
+    Start camera scanner
+  </button>
+
+  <button id="stopButton" class="secondary" type="button"
+          onclick="stopScanner()" disabled>
+    Stop camera
+  </button>
+
+  <div id="reader"></div>
+  <div id="status" role="status" aria-live="polite">
+    Ready to scan.
+  </div>
+
+  <button id="continueButton" type="button"
+          onclick="openPortal()">
+    Open IITE portal to verify student
+  </button>
+</main>
+
+<script>
+  // IMPORTANT: Replace this with your actual deployed Apps Script /exec URL.
+  const PORTAL_URL =
+    'https://script.google.com/macros/s/AKfycbyvcth2GimMXPs2NC4SXuIEUengaan-L3If92PAYjIvqP-cknL8tyIVUvJKelfr_lzR/exec';
+
+  let scanner = null;
+  let starting = false;
+  let scannedId = '';
+
+  const statusBox = document.getElementById('status');
+  const startButton = document.getElementById('startButton');
+  const stopButton = document.getElementById('stopButton');
+  const continueButton = document.getElementById('continueButton');
+
+  function showStatus(text) {
+    statusBox.textContent = text;
+  }
+
+  async function startScanner() {
+    if (scanner || starting) return;
+
+    if (!window.isSecureContext ||
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia) {
+      showStatus('Camera access requires an HTTPS page.');
+      return;
+    }
+
+    if (typeof Html5Qrcode === 'undefined') {
+      showStatus(
+        'The QR library did not load. Check your internet connection and reload.'
+      );
+      return;
+    }
+
+    starting = true;
+    startButton.disabled = true;
+    continueButton.style.display = 'none';
+
+    try {
+      scanner = new Html5Qrcode('reader');
+
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 230, height: 230 } },
+        async function(decodedText) {
+          if (scannedId) return;
+
+          const id = decodedText.trim();
+
+          if (!/^SSIP-IITE-\d+$/i.test(id)) {
+            showStatus(
+              'Invalid QR code. Please scan an IITE registration QR code.'
+            );
+            return;
+          }
+
+          scannedId = id;
+          showStatus('QR scanned. Registration ID: ' + id);
+
+          await stopScanner();
+
+          continueButton.style.display = 'block';
+          continueButton.textContent =
+            'Open portal to verify ' + id;
+        },
+        function() {
+          // Ignore normal frame-by-frame scanning misses.
+        }
+      );
+
+      showStatus('Camera ready. Point it at the student QR code.');
+      stopButton.disabled = false;
+
+    } catch (error) {
+      const name = error && error.name ? error.name : '';
+
+      if (scanner) {
+        try { await scanner.clear(); } catch (ignored) {}
+      }
+      scanner = null;
+
+      if (name === 'NotAllowedError' ||
+          name === 'PermissionDeniedError') {
+        showStatus(
+          'Camera permission denied. Allow camera access for this GitHub Pages site in Chrome.'
+        );
+      } else if (name === 'NotFoundError') {
+        showStatus('No camera was found on this device.');
+      } else {
+        showStatus(
+          'Could not start scanner: ' +
+          (error.message || String(error))
+        );
+      }
+
+      console.error('Scanner startup error:', error);
+
+    } finally {
+      starting = false;
+      startButton.disabled = false;
+    }
+  }
+
+  async function stopScanner() {
+    if (!scanner) {
+      stopButton.disabled = true;
+      return;
+    }
+
+    const active = scanner;
+    scanner = null;
+
+    try {
+      await active.stop();
+    } catch (ignored) {}
+
+    try {
+      await active.clear();
+    } catch (ignored) {}
+
+    stopButton.disabled = true;
+  }
+
+  function openPortal() {
+    if (!scannedId) {
+      showStatus('Scan a valid registration QR code first.');
+      return;
+    }
+
+    if (!PORTAL_URL.startsWith('https://script.google.com/')) {
+      showStatus(
+        'Set PORTAL_URL in index.html to your actual deployed Apps Script /exec URL.'
+      );
+      return;
+    }
+
+    const destination = new URL(PORTAL_URL);
+    destination.searchParams.set('scan', scannedId);
+
+    // Navigation occurs only after the operator clicks this button.
+    window.location.href = destination.toString();
+  }
+
+  window.addEventListener('beforeunload', function() {
+    if (scanner) {
+      try { scanner.stop(); } catch (ignored) {}
+    }
+  });
+</script>
+</body>
+</html>
